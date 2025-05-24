@@ -1,0 +1,11 @@
+streamlit
+openai
+python-dotenv
+sentence-transformers
+scikit-learn
+faiss-cpu
+llama-parse
+requests
+streamlit-option-menu
+tqdm
+numpy
