@@ -22,7 +22,7 @@ load_dotenv()
 with st.sidebar:
     mode = option_menu(
         menu_title="Menu",
-        options=["Fast Retrieval", "Chatbot", "File Q&A"],
+        options=["Fast Retrieval", "File Q&A", "Chatbot"],
         default_index=0,
     )
 

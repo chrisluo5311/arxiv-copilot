@@ -3,3 +3,9 @@
 /.idea
 /.vscode
 scripts/__pycache__
+google colab
+data/arxiv-metadata-oai-snapshot.json
+embeddings/1000000
+embeddings/100000
+pdf_chunks
+pdfs
