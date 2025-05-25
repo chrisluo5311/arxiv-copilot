@@ -31,8 +31,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd ${{ secrets.TARGET_DIR }}
-            # pkill -f streamlit || true
-            nohup streamlit run streamlit_app.py > streamlit.log 2>&1 &
+            nohup streamlit run streamlit_app.py --server.port 8501 > streamlit.log 2>&1 &
             disown
             sleep 2
             

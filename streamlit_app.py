@@ -21,7 +21,7 @@ load_dotenv()
 # Sidebar navigation
 with st.sidebar:
     mode = option_menu(
-        menu_title="Menu",
+        menu_title="ArXiv Copilot",
         options=["Fast Retrieval", "File Q&A", "Chatbot"],
         default_index=0,
     )
