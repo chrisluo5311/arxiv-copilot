@@ -34,6 +34,6 @@ jobs:
             # 關閉舊的 streamlit
             pkill -f streamlit || true
             # 啟動新的 streamlit
-            # nohup streamlit run streamlit_app.py --server.port 8501 --server.address 0.0.0.0 > streamlit.log 2>&1 &
+            nohup streamlit run streamlit_app.py > streamlit.log 2>&1 &
             
             
