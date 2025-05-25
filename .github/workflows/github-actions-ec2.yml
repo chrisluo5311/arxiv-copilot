@@ -33,12 +33,7 @@ jobs:
             cd ${{ secrets.TARGET_DIR }}
             echo "Killing old Streamlit processes if any..."
             echo "Stopping any Streamlit process..."
-            if [ -f streamlit.pid ]; then
-              kill $(cat streamlit.pid) && rm streamlit.pid || echo "No matching PID found"
-            else
-              echo "No PID file found. Trying fallback kill..."
-              pkill -f "streamlit run streamlit_app.py" || true
-            fi
+            fuser -k 8501/tcp || true
             echo "Starting new Streamlit app..."
             nohup streamlit run streamlit_app.py --server.port 8501 > streamlit.log 2>&1 &
             disown
