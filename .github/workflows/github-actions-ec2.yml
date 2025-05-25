@@ -32,10 +32,15 @@ jobs:
           script: |
             cd ${{ secrets.TARGET_DIR }}
             echo "Killing old Streamlit processes if any..."
-            pkill -f "streamlit run streamlit_app.py" || true
+            echo "Stopping any Streamlit process..."
+            if [ -f streamlit.pid ]; then
+              kill $(cat streamlit.pid) && rm streamlit.pid || echo "No matching PID found"
+            else
+              echo "No PID file found. Trying fallback kill..."
+              pkill -f "streamlit run streamlit_app.py" || true
+            fi
             echo "Starting new Streamlit app..."
             nohup streamlit run streamlit_app.py --server.port 8501 > streamlit.log 2>&1 &
             disown
             sleep 2
             echo "Deployment complete. Streamlit should be running on port 8501."
-            exit 0
