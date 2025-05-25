@@ -31,9 +31,8 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd ${{ secrets.TARGET_DIR }}
-            # 關閉舊的 streamlit
             pkill -f streamlit || true
-            # 啟動新的 streamlit
             nohup streamlit run streamlit_app.py > streamlit.log 2>&1 &
-            
+            disown
+            sleep 2
             
