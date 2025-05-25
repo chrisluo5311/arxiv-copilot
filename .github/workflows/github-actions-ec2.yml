@@ -38,3 +38,4 @@ jobs:
             disown
             sleep 2
             echo "Deployment complete. Streamlit should be running on port 8501."
+            exit 0
