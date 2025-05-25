@@ -33,10 +33,6 @@ jobs:
             sudo yum -y update
             sudo yum -y install python3 python3-pip
             cd ${{ secrets.TARGET_DIR }}
-            python3 -m pip install --upgrade pip
-            pip3 install -r requirements.txt
-            # echo 建立 .env
-            echo "LLAMAPARSE_API_KEY=xxx" > .env
             # 關閉舊的 streamlit
             pkill -f streamlit || true
             # 啟動新的 streamlit
