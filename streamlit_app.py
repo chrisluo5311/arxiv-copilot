@@ -2,8 +2,8 @@ import os
 import torch
 import streamlit as st
 from dotenv import load_dotenv
-from custom_func import search_abstracts_function
-from scripts.rag_generate import load_and_chunk, retrieve_top_chunks, generate_answer
+from custom_func import search_abstracts_function, download_arxiv_pdf_function
+from scripts.rag_generate import load_and_chunk, retrieve_top_chunks, standalone_answer
 from scripts.download_pdf import download_arxiv_pdf
 from scripts.parse_pdf_llama import parse_pdf_with_llamaparse
 from scripts.abstract_search import search_abstracts
@@ -17,6 +17,9 @@ import json
 torch.classes.__path__ = []
 # Load environment variables
 load_dotenv()
+# absolute path to the directory where the script is located
+current_dir = os.path.dirname(os.path.abspath(__file__)) # /Users/luojidong/程式/arxiv-copilot
+all_function_tools = [search_abstracts_function, download_arxiv_pdf_function]
 
 # Sidebar navigation
 with st.sidebar:
@@ -83,13 +86,12 @@ if mode == "File Q&A":
     elif question and arxiv_id:
         # Check if the PDF is already downloaded
         # If not, download it
-        pdf_path = f"./pdfs/{arxiv_id}.pdf"
-        parse_pdf = f"./pdf_chunks/{arxiv_id}.txt"
+        pdf_path = f"{current_dir}/pdfs/{arxiv_id}.pdf"
         if not os.path.exists(pdf_path):
-            st.warning("Parsed file not found. Downloading PDF...")
+            st.warning("Path not found. Creating Path for PDF...")
             os.makedirs("./pdfs", exist_ok=True)
             os.makedirs("./pdf_chunks", exist_ok=True)
-        if not download_arxiv_pdf(arxiv_id, pdf_path):
+        if not download_arxiv_pdf(arxiv_id):
             st.error("❌ Failed to download PDF from arXiv.")
             st.stop()
         try:
@@ -100,9 +102,9 @@ if mode == "File Q&A":
             st.error(f"❌ Parsing failed: {str(e)}")
             st.stop()
         try:
-            chunks = load_and_chunk(arxiv_id, './pdf_chunks')
+            chunks = load_and_chunk(arxiv_id)
             top_chunks = retrieve_top_chunks(question, chunks, top_k=top_k)
-            answer = generate_answer(question, top_chunks, model_selection, openai_api_key)
+            answer = standalone_answer(question, top_chunks, model_selection, openai_api_key)
 
             with st.expander("📚 Top Retrieved Chunks"):
                 for i, chunk in enumerate(top_chunks):
@@ -166,18 +168,23 @@ elif mode == "Chatbot":
             response = client.chat.completions.create(
                 model=model_selection,  # model
                 messages=st.session_state.messages, # history messages
-                tools=search_abstracts_function,  # search abstract tools
+                tools=all_function_tools,  # search abstract tools
                 tool_choice="auto",  # auto decide whether to call the function
             )
-            # check assistant choice
-            choice = response.choices[0]
-            tool_calls = choice.message.tool_calls
 
-            if choice.finish_reason == "tool_calls":
+            max_tool_calls = 5
+            call_count = 0
+            # chain of tool calls
+            while response.choices[0].finish_reason == "tool_calls":
+                if call_count >= max_tool_calls:
+                    st.error("⚠️ Too many tool calls — possible infinite loop. Please refine your question.")
+                    break
+                call_count += 1
+                tool_calls = response.choices[0].message.tool_calls
+                print(f"🔧 Tool calls: {tool_calls}")
                 for tool_call in tool_calls:
                     function_name = tool_call.function.name
                     arguments = json.loads(tool_call.function.arguments)
-
                     if function_name == "search_abstracts":
                         st.write(f"🛠️ Calling `{function_name}`...")
                         results = search_abstracts(**arguments)
@@ -200,21 +207,64 @@ elif mode == "Chatbot":
                             "content": top_k_search_result
                         })
 
-                        # Re-call model with the new function result
-                        follow_up = client.chat.completions.create(
-                            model=model_selection,
-                            messages=st.session_state.messages # all the messages in the session
-                        )
-                        received_msg = follow_up.choices[0].message.content
-                        status.update(label="✅ Answer generated.", state="complete", expanded=True)
-            else:
-                received_msg = choice.message.content
-                st.write("✅ GPT responded without tool use.")
+                    elif function_name == "download_arxiv_pdf":
+                        st.write(f"🛠️ Calling `{function_name}`...")
+                        arxiv_id = arguments["arxiv_id"]
+                        if f"pdf_context_{arxiv_id}" in st.session_state:
+                            st.write(f"🧠 Using cached parsed result for `{arxiv_id}`.")
+                            # Log tool result from cache
+                            chunk_context = st.session_state[f"pdf_context_{arxiv_id}"]
+                            st.session_state.messages.append({
+                                "role": "function",
+                                "name": "download_arxiv_pdf",
+                                "content": (
+                                    f"📥 (Cached) Result from `download_pdf`: Relevant chunks from `{arxiv_id}`:\n\n"
+                                    f"{chunk_context}"
+                                )
+                            })
+                            continue
+                        if not download_arxiv_pdf(**arguments):
+                            st.error(f"❌ Failed to download PDF:{arxiv_id} from arXiv.")
+                            st.stop()
+                        st.write(f"📥 PDF:{arxiv_id} downloaded successfully!")
+                        try:
+                            st.write("⏳ Parsing paper with LlamaParse...")
+                            parse_pdf_with_llamaparse(arxiv_id)
+                            st.write(f"✅ PDF:{arxiv_id} parsed successfully!")
 
+                            # Load and chunk the parsed text
+                            chunks = load_and_chunk(arxiv_id)
+                            if not chunks:
+                                st.error(f"No chunks generated from parsed file for arXiv ID: {arxiv_id}")
+                                st.stop()
+                            top_chunks = retrieve_top_chunks(prompt, chunks)
+                            # Log top chunks to session (tool result)
+                            chunk_context = "\n\n".join(top_chunks)
+                            st.session_state[f"pdf_context_{arxiv_id}"] = chunk_context
+                            st.session_state.messages.append({
+                                "role": "function",
+                                "name": "download_arxiv_pdf",
+                                "content": (
+                                    f"📥 Result from `download_pdf`: Here are relevant chunks extracted from the paper `{arxiv_id}`:\n\n"
+                                    f"{chunk_context}"
+                                )
+                            })
+                        except FileNotFoundError:
+                            st.error("Parsed file not found. Make sure the PDF has been parsed into /pdf_chunks/")
+
+                    response = client.chat.completions.create(
+                        model=model_selection,
+                        messages=st.session_state.messages,
+                        tools=all_function_tools,
+                        tool_choice="auto"
+                    )
+
+            final_msg = response.choices[0].message.content
             # Append the assistant's response to the session state
-            st.session_state.messages.append({"role": "assistant", "content": received_msg})
+            st.session_state.messages.append({"role": "assistant", "content": final_msg})
             # Display assistant message
-            st.chat_message("assistant").write(received_msg)
+            st.chat_message("assistant").write(final_msg)
+            status.update(label="✅ Answer generated.", state="complete", expanded=True)
 
 # ------------------- Fast Retrieval Mode ------------------- #
 elif mode == "Fast Retrieval":
