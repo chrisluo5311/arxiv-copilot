@@ -61,10 +61,10 @@ if st.session_state.get("show_toast"):
     del st.session_state["show_toast"]
 # 5. Show available tools
 st.sidebar.subheader("🛠️ Available Tools")
-use_abstracts = st.sidebar.checkbox("📖 Summarize PDF", value=True)
+use_abstracts = st.sidebar.checkbox("📖 Download PDF", value=True)
 available_tools = []
 if use_abstracts:
-    available_tools.append("summarize_pdf")
+    available_tools.append("download_arxiv_pdf")
 
 # 6. Clear chat history
 is_reset_chat = st.sidebar.button("🗑️ Reset Chat")
@@ -127,7 +127,7 @@ elif mode == "Chatbot":
     # Initialize system prompt and first message
     if "messages" not in st.session_state:
         tool_prompt = build_system_prompt(available_tools)
-        combined_prompt = f"{tool_prompt}\n\n{system_prompt_input}"
+        combined_prompt = f"{system_prompt_input}\n\n{tool_prompt}"
         st.session_state["messages"] = [
             {
                 "role": "system",
@@ -138,14 +138,14 @@ elif mode == "Chatbot":
                 "content": "How can I help you?"
             }
         ]
-    # If show prompt => Display the system prompt & first message
     if show_system_prompt:
+        # Show everything in the chat history
         for msg in st.session_state.messages:
             st.chat_message(msg["role"]).write(msg["content"])
     else:
-        # just display the assistant message
         for msg in st.session_state.messages:
-            if msg["role"] != "system":
+            # Skip system, developer, and function messages
+            if msg["role"] != "system" and msg["role"] != "developer" and msg["role"] != "function":
                 st.chat_message(msg["role"]).write(msg["content"])
 
     # User input is assigned to the prompt variable
