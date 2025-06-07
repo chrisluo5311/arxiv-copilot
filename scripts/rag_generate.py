@@ -11,7 +11,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # gpt-3.5-turbo = 16,385 context window # 4,096 max output tokens
 # gpt-4o = 128,000 context window # 16,384 max output tokens
 # chatgpt-4o (currently used in ChatGPT) = 128,000 context window # 16,384 max output tokens
-MODEL_NAME = "gpt-3.5-turbo"
+MODEL_NAME = "gpt-4o"
 MAX_CONTEXT_TOKENS = 12_000           # leave room for the question & response
 model = SentenceTransformer("all-MiniLM-L6-v2")
 current_dir = os.path.dirname(os.path.abspath(__file__)) # /Users/luojidong/程式/arxiv-copilot/scripts
@@ -44,11 +44,13 @@ def retrieve_top_chunks(query, chunks, top_k=10):
     top_indices = similarities.argsort()[::-1][:top_k]
     return [chunks[i] for i in top_indices]
 
-def standalone_answer(query, chunks, model_name, api_key=None):
+def standalone_answer(query, chunks, model_name, base64_image, api_key=None):
     client = OpenAI(api_key=api_key)
     context = "\n\n".join(chunks)
     prompt = f"""You are a helpful AI assistant specialized in scientific research.
             You are given a user question and some context extracted from a scientific paper.
+            
+            Please think step-by-step before answering.
             
             Context:
             \"\"\"
@@ -68,19 +70,24 @@ def standalone_answer(query, chunks, model_name, api_key=None):
             },
             {
                 "role": "user",
-                "content": prompt
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:image/png;base64,{base64_image}"
+                    }}
+                ]
             }
         ]
     )
     return response.choices[0].message.content.strip()
 
 # Example
-if __name__ == "__main__":
-    arxiv_id = "0704.0001"
-    query = "How does the paper calculate diphoton production cross-sections?"
-    chunks = load_and_chunk(arxiv_id)
-    top_chunks = retrieve_top_chunks(query, chunks, top_k=5)
-    answer = standalone_answer(query, top_chunks, MODEL_NAME, api_key=os.getenv("OPENAI_API_KEY"))
-
-    print("🔎 Answer:")
-    print(answer)
+# if __name__ == "__main__":
+#     arxiv_id = "0704.0001"
+#     query = "How does the paper calculate diphoton production cross-sections?"
+#     chunks = load_and_chunk(arxiv_id)
+#     top_chunks = retrieve_top_chunks(query, chunks, top_k=5)
+#     answer = standalone_answer(query, top_chunks, MODEL_NAME, api_key=os.getenv("OPENAI_API_KEY"))
+#
+#     print("🔎 Answer:")
+#     print(answer)

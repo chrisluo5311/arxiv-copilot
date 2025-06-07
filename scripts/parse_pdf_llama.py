@@ -21,11 +21,13 @@ parser = LlamaParse(api_key=api_key, verbose=True, result_type="markdown")
 
 # === Parse PDF  ===
 def parse_pdf_with_llamaparse(arxiv_id: str):
+    # if not os.path.exists(chunk_output_path):
+    #     os.makedirs(chunk_output_path)
+    output_file_name = os.path.join(chunk_output_path, f"{arxiv_id}.txt")
+    if os.path.exists(output_file_name) and os.path.getsize(output_file_name) > 0:
+        return
     arxiv_pdf = os.path.join(source_path, f"{arxiv_id}.pdf")
     documents = parser.load_data(arxiv_pdf)
-    if not os.path.exists(chunk_output_path):
-        os.makedirs(chunk_output_path)
-    output_file_name = os.path.join(chunk_output_path, f"{arxiv_id}.txt")
     with open(output_file_name, "w") as f:
         for doc in tqdm(documents, desc="Parsing PDF"):
             f.write(doc.text + "\n\n")

@@ -3,10 +3,10 @@ import faiss
 from sentence_transformers import SentenceTransformer
 
 MODEL_NAME = "all-MiniLM-L6-v2"
-INDEX_PATH = "/home/ec2-user/arxiv-copilot/embeddings/1000000/faiss_index.index"
-META_PATH = "/home/ec2-user/arxiv-copilot/embeddings/1000000/meta.json"
-# INDEX_PATH = "/Users/luojidong/程式/arxiv-copilot/embeddings/1000000/faiss_index.index"
-# META_PATH = "/Users/luojidong/程式/arxiv-copilot/embeddings/1000000/meta.json"
+# INDEX_PATH = "/home/ec2-user/arxiv-copilot/embeddings/1000000/faiss_index.index"
+# META_PATH = "/home/ec2-user/arxiv-copilot/embeddings/1000000/meta.json"
+INDEX_PATH = "/Users/luojidong/程式/arxiv-copilot/embeddings/1000000/faiss_index.index"
+META_PATH = "/Users/luojidong/程式/arxiv-copilot/embeddings/1000000/meta.json"
 
 model = SentenceTransformer(MODEL_NAME)
 index = faiss.read_index(INDEX_PATH)
