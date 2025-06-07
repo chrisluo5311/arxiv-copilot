@@ -104,7 +104,7 @@ if mode == "File Q&A":
         try:
             chunks = load_and_chunk(arxiv_id)
             top_chunks = retrieve_top_chunks(question, chunks, top_k=top_k)
-            answer = standalone_answer(question, top_chunks, model_selection, openai_api_key)
+            answer = standalone_answer(question, top_chunks, model_selection, None, openai_api_key)
 
             with st.expander("📚 Top Retrieved Chunks"):
                 for i, chunk in enumerate(top_chunks):

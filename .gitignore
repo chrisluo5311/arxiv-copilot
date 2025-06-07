@@ -7,5 +7,9 @@ google colab
 data/arxiv-metadata-oai-snapshot.json
 embeddings/1000000
 embeddings/100000
-pdf_chunks
-pdfs
+embeddings/filter
+embeddings/filterv2
+/scripts/pdfs
+/scripts/pdf_chunks
+/data/SPIQA
+/data/SPIQA_testA_Images
