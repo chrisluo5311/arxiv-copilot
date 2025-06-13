@@ -5,23 +5,70 @@ from dotenv import load_dotenv
 from custom_func import search_abstracts_function, download_arxiv_pdf_function
 from scripts.rag_generate import load_and_chunk, retrieve_top_chunks, standalone_answer
 from scripts.download_pdf import download_arxiv_pdf
-from scripts.parse_pdf_llama import parse_pdf_with_llamaparse
+from scripts.parse_pdf_llama import parse_pdf_with_llamaparse, parse_file_with_llamaparse
 from scripts.abstract_search import search_abstracts
 from scripts.utils import build_system_prompt
 from scripts.prompt_template import default_prompt
 from streamlit_option_menu import option_menu
 from openai import OpenAI
 import json
+import base64
+from PIL import Image
 
+# ------------------ Configuration ------------------ #
 # disable torch classes
 torch.classes.__path__ = []
 # Load environment variables
 load_dotenv()
 # absolute path to the directory where the script is located
-current_dir = os.path.dirname(os.path.abspath(__file__)) # /Users/luojidong/程式/arxiv-copilot
+# e.g., current_dir: "/Users/luojidong/程式/arxiv-copilot"
+current_dir = os.path.dirname(os.path.abspath(__file__))
 all_function_tools = [search_abstracts_function, download_arxiv_pdf_function]
 
-# Sidebar navigation
+# Define the list of supported file types
+image_exts = ["jpg", "jpeg", "png"]
+text_exts = ["pdf", "csv", "txt"]
+uploaded_file_save_path = os.path.join(current_dir, "scripts", "user_upload")
+
+# ------------------ Helper function ------------------ #
+def resize_image(image_path, max_dim=224):
+    img = Image.open(image_path)
+    img.thumbnail((max_dim, max_dim))
+    img.save(image_path)
+
+def encode_image_to_base64(image_path):
+    if not os.path.exists(image_path):
+        print(f"Image file not found: {image_path}")
+        return ""
+    with open(image_path, "rb") as image_file:
+        encoded = base64.b64encode(image_file.read()).decode("utf-8")
+    return encoded
+
+def process_uploaded_file(files, query):
+    """
+    Process the uploaded file and return its content.
+    """
+    for uploaded_file in files:
+        filename = uploaded_file.name
+        ext = filename.split(".")[-1].lower()
+        full_filename = uploaded_file_save_path+"/"+filename
+
+        with open(full_filename, "wb") as f:
+            f.write(uploaded_file.read())
+
+        if ext in ["jpg", "jpeg", "png"]:
+            resize_image(full_filename)
+            base64_img = encode_image_to_base64(full_filename)
+            return base64_img, ext
+        elif ext in ["pdf", "csv", "txt"]:
+            parse_file_with_llamaparse(filename)
+            upload_file_chunks = load_and_chunk(filename)
+            top_uploaded_chunks =retrieve_top_chunks(query, upload_file_chunks, 3)
+            return top_uploaded_chunks, None
+    return "", None
+
+
+# ------------------ Sidebar navigation ------------------ #
 with st.sidebar:
     mode = option_menu(
         menu_title="ArXiv Copilot",
@@ -29,7 +76,7 @@ with st.sidebar:
         default_index=0,
     )
 
-# Side bar
+# ------------------ Sidebar ------------------ #
 # 1. OpenAI api key
 openai_api_key = st.sidebar.text_input("OpenAI API Key", key="chatbot_api_key", type="password")
 # 2. Model selection
@@ -149,17 +196,45 @@ elif mode == "Chatbot":
                 st.chat_message(msg["role"]).write(msg["content"])
 
     # User input is assigned to the prompt variable
-    if prompt := st.chat_input("Ask me anything about arXiv papers!"):
+    if prompt := st.chat_input("Ask me anything about arXiv papers!",
+                                accept_file=True,
+                                file_type=["jpg", "jpeg", "png", "pdf", "csv", "txt"]):
         if not openai_api_key:
             st.info("Please add your OpenAI API key to continue.")
             st.stop()
 
+        # ------ Process user input and uploaded files ------ #
+        user_text = prompt.get("text", "")
+        files = prompt.get("files", [])
+        uploaded_file_content = ""
+        file_ext = None
+        if files:
+            uploaded_file_content, file_ext = process_uploaded_file(files, user_text)
+
+        # If image is uploaded, clear older messages
+        if file_ext in image_exts:
+            st.session_state.messages = st.session_state.messages[:2]  # Keep only system and greeting
+
+        # append user input to the message history
+        if isinstance(uploaded_file_content, str) and uploaded_file_content.startswith("data:image/"):
+            # This is a base64 image already in data URI format
+            st.session_state.messages.append({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_text or "Analyze this image:"},
+                    {"type": "image_url", "image_url": {"url": f"data:image/{file_ext};base64,{uploaded_file_content}"}}
+                ]
+            })
+        else:
+            # This is textual context (e.g., chunked text from PDF/txt/csv)
+            combined_text = f"{user_text}\n\n{uploaded_file_content}" if uploaded_file_content else user_text
+            st.session_state.messages.append({"role": "user", "content": combined_text})
+
+        # display user message
+        st.chat_message("user").write(user_text)
+
         # Initialize OpenAI client
         client = OpenAI(api_key=openai_api_key)
-        # append user input to the message history
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        # display user message
-        st.chat_message("user").write(prompt)
 
         with st.status("💬 Thinking...", expanded=True) as status:
             st.write("🧠 Sending query to GPT...")
@@ -181,7 +256,7 @@ elif mode == "Chatbot":
                     break
                 call_count += 1
                 tool_calls = response.choices[0].message.tool_calls
-                print(f"🔧 Tool calls: {tool_calls}")
+                # ------------------ Tool calls ------------------ #
                 for tool_call in tool_calls:
                     function_name = tool_call.function.name
                     arguments = json.loads(tool_call.function.arguments)
@@ -237,7 +312,7 @@ elif mode == "Chatbot":
                             if not chunks:
                                 st.error(f"No chunks generated from parsed file for arXiv ID: {arxiv_id}")
                                 st.stop()
-                            top_chunks = retrieve_top_chunks(prompt, chunks)
+                            top_chunks = retrieve_top_chunks(user_text, chunks)
                             # Log top chunks to session (tool result)
                             chunk_context = "\n\n".join(top_chunks)
                             st.session_state[f"pdf_context_{arxiv_id}"] = chunk_context
