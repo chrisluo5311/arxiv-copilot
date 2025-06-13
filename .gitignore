@@ -13,3 +13,4 @@ embeddings/filterv2
 /scripts/pdf_chunks
 /data/SPIQA
 /data/SPIQA_testA_Images
+/scripts/user_upload/

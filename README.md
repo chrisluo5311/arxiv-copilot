@@ -15,6 +15,7 @@ arxiv-copilot is an interactive tool for searching, downloading, parsing, and Q&
 - `streamlit_app.py`: Main Streamlit application.
 - `custom_func.py`: Custom abstract search tools.
 - `scripts/`: Helper scripts (PDF download, parsing, RAG Q&A, etc.).
+- `scripts/evaluation/rag_evaluation.py`: RAG evaluation script.
 - `data/arxiv-metadata-oai-snapshot.json`: arXiv paper metadata.
 - `pdfs/`, `pdf_chunks/`: Original PDFs and parsed text chunks.
 - `embeddings/`: Vector index storage.
@@ -57,7 +58,3 @@ arxiv-copilot is an interactive tool for searching, downloading, parsing, and Q&
 ## License
 
 This project is for academic and research use only.
-
----
-
-For more details, please refer to the script files or [streamlit_app.py](streamlit_app.py).
