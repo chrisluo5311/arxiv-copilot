@@ -37,7 +37,7 @@ def load_and_chunk(arxiv_id, chunk_size=300, stride=100):
     return chunks
 
 def load_uploaded_file_and_chunk(file_name, chunk_size=300, stride=100):
-    path = os.path.join(upload_file_chunk_dir, f"{file_name}") # /Users/luojidong/程式/arxiv-copilot/scripts/pdf_chunks/0704.0001.txt
+    path = os.path.join(upload_file_chunk_dir, f"{file_name}.txt") # /Users/luojidong/程式/arxiv-copilot/scripts/pdf_chunks/0704.0001.txt
     if not os.path.exists(path):
         raise FileNotFoundError(f"uploaded file not found: {path}")
     with open(path, "r") as f:
