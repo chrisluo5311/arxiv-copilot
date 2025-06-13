@@ -57,7 +57,7 @@ arxiv-copilot is an interactive tool for searching, downloading, parsing, and Q&
 
 ## Project Report and Demo
 
-- **Project Report**: [arXiv Copilot - A RAG Chatbot for Research Assistance.pdf](https://github.com/chrisluo5311/arxiv-copilot/blob/master/arXiv%20Copilot%20-%20A%20RAG%20Chatbot%20for%20Research%20Assistance.pdf)
+- **Project Report**: [arXiv Copilot - A RAG Chatbot for Research Assistance.pdf](https://github.com/chrisluo5311/arxiv-copilot/blob/master/arXiv%20Copilot%20-%20A%20RAG%20chatbot%20for%20Research%20Assistance.pdf)
 - **Demo Video**: [Watch the demo on YouTube](https://youtu.be/gKjVLPHzCXM)
 
 
