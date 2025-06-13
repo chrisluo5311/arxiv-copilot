@@ -3,7 +3,7 @@ import torch
 import streamlit as st
 from dotenv import load_dotenv
 from custom_func import search_abstracts_function, download_arxiv_pdf_function
-from scripts.rag_generate import load_and_chunk, retrieve_top_chunks, standalone_answer
+from scripts.rag_generate import load_and_chunk, load_uploaded_file_and_chunk, retrieve_top_chunks, standalone_answer
 from scripts.download_pdf import download_arxiv_pdf
 from scripts.parse_pdf_llama import parse_pdf_with_llamaparse, parse_file_with_llamaparse
 from scripts.abstract_search import search_abstracts
@@ -50,6 +50,7 @@ def process_uploaded_file(files, query):
     """
     for uploaded_file in files:
         filename = uploaded_file.name
+        print(f"Processing file {filename}...")
         ext = filename.split(".")[-1].lower()
         full_filename = uploaded_file_save_path+"/"+filename
 
@@ -57,12 +58,13 @@ def process_uploaded_file(files, query):
             f.write(uploaded_file.read())
 
         if ext in ["jpg", "jpeg", "png"]:
+            # Resize the image to prevent token limit violation
             resize_image(full_filename)
             base64_img = encode_image_to_base64(full_filename)
             return base64_img, ext
         elif ext in ["pdf", "csv", "txt"]:
             parse_file_with_llamaparse(filename)
-            upload_file_chunks = load_and_chunk(filename)
+            upload_file_chunks = load_uploaded_file_and_chunk(filename)
             top_uploaded_chunks =retrieve_top_chunks(query, upload_file_chunks, 3)
             return top_uploaded_chunks, None
     return "", None
@@ -209,6 +211,7 @@ elif mode == "Chatbot":
         uploaded_file_content = ""
         file_ext = None
         if files:
+            st.write("📝 Parsing uploaded file...")
             uploaded_file_content, file_ext = process_uploaded_file(files, user_text)
 
         # If image is uploaded, clear older messages
