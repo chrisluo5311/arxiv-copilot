@@ -16,6 +16,7 @@ MAX_CONTEXT_TOKENS = 12_000           # leave room for the question & response
 model = SentenceTransformer("all-MiniLM-L6-v2")
 current_dir = os.path.dirname(os.path.abspath(__file__)) # /Users/luojidong/程式/arxiv-copilot/scripts
 chunk_dir = os.path.join(current_dir, "pdf_chunks") # /Users/luojidong/程式/arxiv-copilot/scripts/pdf_chunks
+upload_file_chunk_dir = os.path.join(current_dir, "upload_file_chunks") # /Users/luojidong/程式/arxiv-copilot/scripts/pdf_chunks
 # --------------------------------------------------- #
 
 # Try chunk_size = 300–400, stride = 100–200
@@ -25,6 +26,20 @@ def load_and_chunk(arxiv_id, chunk_size=300, stride=100):
     path = os.path.join(chunk_dir, f"{arxiv_id}.txt") # /Users/luojidong/程式/arxiv-copilot/scripts/pdf_chunks/0704.0001.txt
     if not os.path.exists(path):
         raise FileNotFoundError(f"arXiv file not found: {path}")
+    with open(path, "r") as f:
+        full_text = f.read()
+
+    # Split into chunks of N words
+    words = full_text.split()
+    # Overlapping: [0,299], [100,399], [200,499], ...
+    # Better continuity between chunks
+    chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words) - chunk_size + 1, stride)]
+    return chunks
+
+def load_uploaded_file_and_chunk(file_name, chunk_size=300, stride=100):
+    path = os.path.join(upload_file_chunk_dir, f"{file_name}") # /Users/luojidong/程式/arxiv-copilot/scripts/pdf_chunks/0704.0001.txt
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"uploaded file not found: {path}")
     with open(path, "r") as f:
         full_text = f.read()
 
@@ -49,8 +64,6 @@ def standalone_answer(query, chunks, model_name, base64_image, api_key=None):
     context = "\n\n".join(chunks)
     prompt = f"""You are a helpful AI assistant specialized in scientific research.
             You are given a user question and some context extracted from a scientific paper.
-            
-            Please think step-by-step before answering.
             
             Context:
             \"\"\"
