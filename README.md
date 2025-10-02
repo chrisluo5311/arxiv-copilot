@@ -42,7 +42,7 @@ arxiv-copilot is an interactive tool for searching, downloading, parsing, and Q&
 
 ## Usage
 
-1. After launch, enter your OpenAI API key in the sidebar.
+1. Enter your OpenAI API key in the sidebar.
 2. Select a mode (Fast Retrieval, Chatbot, File Q&A).
 3. In File Q&A mode, enter an arXiv ID and your question to automatically download, parse, and query the paper.
 4. In Chatbot mode, interact with the AI assistant, which supports abstract search tools.
