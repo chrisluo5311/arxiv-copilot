@@ -8,4 +8,4 @@ llama-parse==0.6.23
 requests==2.32.3
 streamlit-option-menu==0.4.0
 tqdm==4.67.1
-numpy==2.2.4
+numpy==2.0.2
