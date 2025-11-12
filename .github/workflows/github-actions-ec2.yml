@@ -58,13 +58,31 @@ jobs:
             fi
             echo "Activating virtual environment..."
             source .venv/bin/activate
+            echo "Upgrading pip..."
+            pip3 install --upgrade pip
             echo "Installing/updating Python dependencies..."
             pip3 install -r requirements.txt --upgrade
+            if [ $? -ne 0 ]; then
+              echo "Failed to install dependencies. Check requirements.txt"
+              exit 1
+            fi
+            echo "Verifying Streamlit installation..."
+            which streamlit || {
+              echo "Streamlit not found in PATH"
+              exit 1
+            }
             echo "Killing old Streamlit processes if any..."
-            echo "Stopping any Streamlit process..."
             fuser -k 8501/tcp || true
-            echo "Starting new Streamlit app..."
-            nohup streamlit run streamlit_app.py --server.port 8501 --server.baseUrlPath /streamlit > streamlit.log 2>&1 &
-            disown
             sleep 2
-            echo "Deployment complete. Streamlit should be running on port 8501 at /streamlit/"
+            echo "Starting new Streamlit app..."
+            # use the full path of the virtual environment
+            nohup .venv/bin/streamlit run streamlit_app.py --server.port 8501 --server.baseUrlPath /streamlit > streamlit.log 2>&1 &
+            sleep 3
+            echo "Checking if Streamlit started..."
+            if pgrep -f "streamlit run" > /dev/null; then
+              echo "✅ Deployment complete. Streamlit is running on port 8501 at /streamlit/"
+            else
+              echo "❌ Streamlit failed to start. Check streamlit.log:"
+              tail -20 streamlit.log
+              exit 1
+            fi
