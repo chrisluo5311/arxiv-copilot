@@ -43,6 +43,57 @@ jobs:
               git lfs pull || echo "Git LFS pull failed, files may need manual setup"
             fi
 
+      - name: Check and clean up disk space
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST_DNS }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "=== Disk Space Check ==="
+            df -h
+            echo ""
+            echo "=== Cleaning up disk space ==="
+            # Clean pip cache (both system and user)
+            pip cache purge 2>/dev/null || echo "No pip cache to clean"
+            pip3 cache purge 2>/dev/null || echo "No pip3 cache to clean"
+            rm -rf ~/.cache/pip 2>/dev/null || echo "No user pip cache to clean"
+            # Clean virtual environment pip cache if exists
+            cd ${{ secrets.TARGET_DIR }}
+            if [ -d ".venv" ]; then
+              .venv/bin/pip cache purge 2>/dev/null || echo "No venv pip cache to clean"
+              rm -rf .venv/lib/python*/site-packages/*/__pycache__ 2>/dev/null || echo "No pycache to clean"
+            fi
+            # Clean system package cache (if on Ubuntu/Debian)
+            sudo apt-get clean 2>/dev/null || echo "No apt cache to clean"
+            # Clean old log files (keep last 7 days)
+            find /var/log -name "*.log" -type f -mtime +7 -delete 2>/dev/null || echo "No old logs to clean"
+            # Clean temporary files
+            sudo rm -rf /tmp/* 2>/dev/null || echo "No temp files to clean"
+            sudo rm -rf /var/tmp/* 2>/dev/null || echo "No var/tmp files to clean"
+            # Clean old Streamlit logs (keep last 100 lines)
+            if [ -f streamlit.log ]; then
+              tail -100 streamlit.log > streamlit.log.tmp && mv streamlit.log.tmp streamlit.log || echo "Could not truncate streamlit.log"
+            fi
+            # Check inode usage
+            echo ""
+            echo "=== Inode Usage ==="
+            df -i
+            echo ""
+            echo "=== Disk Space After Cleanup ==="
+            df -h
+            echo ""
+            echo "=== Checking available disk space ==="
+            # Check if root partition has less than 1GB free
+            AVAILABLE=$(df / | tail -1 | awk '{print $4}')
+            if [ "$AVAILABLE" -lt 1048576 ]; then
+              echo "⚠️ WARNING: Less than 1GB free space remaining!"
+              echo "Available: ${AVAILABLE}KB"
+              echo "Please manually clean up more space or expand the disk."
+            else
+              echo "✅ Sufficient disk space available: ${AVAILABLE}KB"
+            fi
+
       - name: Executing remote ssh commands using ssh key
         uses: appleboy/ssh-action@master
         with:
@@ -60,8 +111,11 @@ jobs:
             source .venv/bin/activate
             echo "Upgrading pip..."
             pip3 install --upgrade pip
-            echo "Installing/updating Python dependencies..."
-            pip3 install -r requirements.txt --upgrade
+            echo "Cleaning pip cache before installation..."
+            pip3 cache purge || true
+            rm -rf ~/.cache/pip 2>/dev/null || true
+            echo "Installing/updating Python dependencies (without cache)..."
+            pip3 install -r requirements.txt --upgrade --no-cache-dir --no-warn-script-location
             if [ $? -ne 0 ]; then
               echo "Failed to install dependencies. Check requirements.txt"
               exit 1
