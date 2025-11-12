@@ -64,7 +64,7 @@ jobs:
             echo "Stopping any Streamlit process..."
             fuser -k 8501/tcp || true
             echo "Starting new Streamlit app..."
-            nohup streamlit run streamlit_app.py --server.port 8501 > streamlit.log 2>&1 &
+            nohup streamlit run streamlit_app.py --server.port 8501 --server.baseUrlPath /streamlit > streamlit.log 2>&1 &
             disown
             sleep 2
-            echo "Deployment complete. Streamlit should be running on port 8501"
+            echo "Deployment complete. Streamlit should be running on port 8501 at /streamlit/"
