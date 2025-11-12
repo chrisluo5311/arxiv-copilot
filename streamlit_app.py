@@ -18,9 +18,8 @@ from PIL import Image
 # ------------------ Configuration ------------------ #
 # disable torch classes
 torch.classes.__path__ = []
-# Load environment variables
 load_dotenv()
-# absolute path to the directory where the script is located
+
 # e.g., current_dir: "/Users/luojidong/程式/arxiv-copilot"
 current_dir = os.path.dirname(os.path.abspath(__file__))
 all_function_tools = [search_abstracts_function, download_arxiv_pdf_function]
@@ -87,9 +86,9 @@ model_selection = st.sidebar.selectbox(
     options=["gpt-3.5-turbo", "gpt-4o", "gpt-4.1-nano"],
 )
 # 3. Show system prompt
-show_system_prompt = st.sidebar.checkbox("🔧 Show system prompt", value=False)
+show_system_prompt = st.sidebar.checkbox("Show system prompt", value=False)
 # 4. Custom system prompt (editable for debugging)
-st.sidebar.subheader("🧠 System Prompt")
+st.sidebar.subheader("System Prompt")
 system_prompt_input = st.sidebar.text_area(
     label="✏️ Edit System Prompt",
     value=default_prompt,
@@ -109,8 +108,8 @@ if st.session_state.get("show_toast"):
     st.toast('Reset successfully!', icon='🎉')
     del st.session_state["show_toast"]
 # 5. Show available tools
-st.sidebar.subheader("🛠️ Available Tools")
-use_abstracts = st.sidebar.checkbox("📖 Download PDF", value=True)
+st.sidebar.subheader("Available Tools")
+use_abstracts = st.sidebar.checkbox("Download PDF", value=True)
 available_tools = []
 if use_abstracts:
     available_tools.append("download_arxiv_pdf")
@@ -140,9 +139,9 @@ if mode == "File Q&A":
             st.warning("Path not found. Creating Path for PDF...")
             os.makedirs("./pdfs", exist_ok=True)
             os.makedirs("./pdf_chunks", exist_ok=True)
-        if not download_arxiv_pdf(arxiv_id):
-            st.error("❌ Failed to download PDF from arXiv.")
-            st.stop()
+            if not download_arxiv_pdf(arxiv_id):
+                st.error("❌ Failed to download PDF from arXiv.")
+                st.stop()
         try:
             with st.spinner("Parsing paper with LlamaParse..."):
                 parse_pdf_with_llamaparse(arxiv_id)
@@ -155,7 +154,8 @@ if mode == "File Q&A":
             top_chunks = retrieve_top_chunks(question, chunks, top_k=top_k)
             answer = standalone_answer(question, top_chunks, model_selection, None, openai_api_key)
 
-            with st.expander("📚 Top Retrieved Chunks"):
+            # Display the top retrieved chunks
+            with st.expander("Top Retrieved Chunks"):
                 for i, chunk in enumerate(top_chunks):
                     st.markdown(f"**Chunk {i+1}:**")
                     st.write(chunk)
@@ -169,7 +169,7 @@ if mode == "File Q&A":
 # ------------------- Chatbot Mode ------------------- #
 elif mode == "Chatbot":
     st.title("Chatbot")
-    st.caption("🚀 A general-purpose chatbot powered by OpenAI")
+    st.caption("A general-purpose chatbot powered by OpenAI")
 
     "[Get an OpenAI API key](https://platform.openai.com/account/api-keys)"
 
@@ -211,10 +211,10 @@ elif mode == "Chatbot":
         uploaded_file_content = ""
         file_ext = None
         if files:
-            st.write("📝 Parsing uploaded file...")
+            st.write("Parsing uploaded file...")
             uploaded_file_content, file_ext = process_uploaded_file(files, user_text)
 
-        # If image is uploaded, clear older messages
+        # If image is uploaded, clear older messages to avoid token limit violation
         if file_ext in image_exts:
             st.session_state.messages = st.session_state.messages[:2]  # Keep only system and greeting
 
@@ -240,7 +240,7 @@ elif mode == "Chatbot":
         client = OpenAI(api_key=openai_api_key)
 
         with st.status("💬 Thinking...", expanded=True) as status:
-            st.write("🧠 Sending query to GPT...")
+            st.write("Sending query to GPT...")
 
             # generate response
             response = client.chat.completions.create(
@@ -264,7 +264,7 @@ elif mode == "Chatbot":
                     function_name = tool_call.function.name
                     arguments = json.loads(tool_call.function.arguments)
                     if function_name == "search_abstracts":
-                        st.write(f"🛠️ Calling `{function_name}`...")
+                        st.write(f"Calling `{function_name}`...")
                         results = search_abstracts(**arguments)
 
                         # Format the top-k search results
@@ -276,7 +276,7 @@ elif mode == "Chatbot":
                             for r in results]
                         )
 
-                        st.write("📚 Tool results received. Re-querying GPT...")
+                        st.write("Tool results received. Re-querying GPT...")
 
                         # Log tool response
                         st.session_state.messages.append({
@@ -286,17 +286,17 @@ elif mode == "Chatbot":
                         })
 
                     elif function_name == "download_arxiv_pdf":
-                        st.write(f"🛠️ Calling `{function_name}`...")
+                        st.write(f"Calling `{function_name}`...")
                         arxiv_id = arguments["arxiv_id"]
                         if f"pdf_context_{arxiv_id}" in st.session_state:
-                            st.write(f"🧠 Using cached parsed result for `{arxiv_id}`.")
+                            st.write(f"Using cached parsed result for `{arxiv_id}`.")
                             # Log tool result from cache
                             chunk_context = st.session_state[f"pdf_context_{arxiv_id}"]
                             st.session_state.messages.append({
                                 "role": "function",
                                 "name": "download_arxiv_pdf",
                                 "content": (
-                                    f"📥 (Cached) Result from `download_pdf`: Relevant chunks from `{arxiv_id}`:\n\n"
+                                    f"(Cached) Result from `download_pdf`: Relevant chunks from `{arxiv_id}`:\n\n"
                                     f"{chunk_context}"
                                 )
                             })
@@ -304,11 +304,11 @@ elif mode == "Chatbot":
                         if not download_arxiv_pdf(**arguments):
                             st.error(f"❌ Failed to download PDF:{arxiv_id} from arXiv.")
                             st.stop()
-                        st.write(f"📥 PDF:{arxiv_id} downloaded successfully!")
+                        st.write(f"PDF:{arxiv_id} downloaded successfully!")
                         try:
-                            st.write("⏳ Parsing paper with LlamaParse...")
+                            st.write("Parsing paper with LlamaParse...")
                             parse_pdf_with_llamaparse(arxiv_id)
-                            st.write(f"✅ PDF:{arxiv_id} parsed successfully!")
+                            st.write(f"PDF:{arxiv_id} parsed successfully!")
 
                             # Load and chunk the parsed text
                             chunks = load_and_chunk(arxiv_id)
@@ -318,12 +318,13 @@ elif mode == "Chatbot":
                             top_chunks = retrieve_top_chunks(user_text, chunks)
                             # Log top chunks to session (tool result)
                             chunk_context = "\n\n".join(top_chunks)
+                            # Cache the chunk context for future use
                             st.session_state[f"pdf_context_{arxiv_id}"] = chunk_context
                             st.session_state.messages.append({
                                 "role": "function",
                                 "name": "download_arxiv_pdf",
                                 "content": (
-                                    f"📥 Result from `download_pdf`: Here are relevant chunks extracted from the paper `{arxiv_id}`:\n\n"
+                                    f"Result from `download_pdf`: Here are relevant chunks extracted from the paper `{arxiv_id}`:\n\n"
                                     f"{chunk_context}"
                                 )
                             })
@@ -350,7 +351,8 @@ elif mode == "Fast Retrieval":
     st.caption("Search for arXiv papers by abstract")
 
     query = st.text_input("Enter a topic or keyword to search for arXiv papers")
-    top_k = st.slider("🔍 Top-k Results", min_value=1, max_value=10, value=5)
+    # Top-k results to display
+    top_k = st.slider("Top-k Results", min_value=1, max_value=10, value=5)
 
     # Fast retrieval using FAISS, no need AI models
     if query:

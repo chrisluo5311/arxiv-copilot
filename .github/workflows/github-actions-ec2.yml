@@ -13,7 +13,9 @@ jobs:
 
     steps:
       - name: Checkout the files
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
+        with:
+          lfs: true
 
       - name: Deploy to Server 1
         uses: easingthemes/ssh-deploy@main
@@ -23,6 +25,24 @@ jobs:
           REMOTE_USER: ${{ secrets.USERNAME }}
           TARGET: ${{ secrets.TARGET_DIR }}
 
+      - name: Pull Git LFS files on EC2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST_DNS }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ${{ secrets.TARGET_DIR }}
+            if command -v git-lfs &> /dev/null; then
+              echo "Pulling Git LFS files..."
+              git lfs pull
+            else
+              echo "Git LFS not installed on server, installing..."
+              # Install Git LFS if not available (for Ubuntu/Debian)
+              sudo apt-get update && sudo apt-get install -y git-lfs || echo "Failed to install Git LFS"
+              git lfs pull || echo "Git LFS pull failed, files may need manual setup"
+            fi
+
       - name: Executing remote ssh commands using ssh key
         uses: appleboy/ssh-action@master
         with:
@@ -31,6 +51,15 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd ${{ secrets.TARGET_DIR }}
+            echo "Setting up virtual environment..."
+            if [ ! -d ".venv" ]; then
+              echo "Creating .venv virtual environment..."
+              python3 -m venv .venv
+            fi
+            echo "Activating virtual environment..."
+            source .venv/bin/activate
+            echo "Installing/updating Python dependencies..."
+            pip3 install -r requirements.txt --upgrade
             echo "Killing old Streamlit processes if any..."
             echo "Stopping any Streamlit process..."
             fuser -k 8501/tcp || true
@@ -38,4 +67,4 @@ jobs:
             nohup streamlit run streamlit_app.py --server.port 8501 > streamlit.log 2>&1 &
             disown
             sleep 2
-            echo "Deployment complete. Streamlit should be running on port 8501."
+            echo "Deployment complete. Streamlit should be running on port 8501"

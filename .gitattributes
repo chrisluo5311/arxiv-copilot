@@ -4,3 +4,5 @@ scripts/evaluation/text-only-eval/** filter=lfs diff=lfs merge=lfs -text
 data/filter/** filter=lfs diff=lfs merge=lfs -text
 arXiv[[:space:]]Copilot[[:space:]]RAG[[:space:]]Architecture.drawio filter=lfs diff=lfs merge=lfs -text
 arXiv[[:space:]]Copilot[[:space:]]-[[:space:]]A[[:space:]]RAG[[:space:]]chatbot[[:space:]]for[[:space:]]Research[[:space:]]Assistance.pdf filter=lfs diff=lfs merge=lfs -text
+embeddings/1000000/faiss_index.index filter=lfs diff=lfs merge=lfs -text
+embeddings/1000000/meta.json filter=lfs diff=lfs merge=lfs -text

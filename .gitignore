@@ -2,16 +2,16 @@
 /__pycache__/
 /.idea
 /.vscode
+.DS_Store
 scripts/__pycache__
-google colab
 data/arxiv-metadata-oai-snapshot.json
-embeddings/1000000
-embeddings/100000
+/data/SPIQA
+/data/SPIQA_testA_Images
+embeddings/1000000/abstracts.npy
+# Note: faiss_index.index and meta.json are tracked in Git for deployment
 embeddings/filter
 embeddings/filterv2
 /scripts/pdfs
 /scripts/pdf_chunks
-/data/SPIQA
-/data/SPIQA_testA_Images
 /scripts/user_upload/
 /scripts/upload_file_chunks/
