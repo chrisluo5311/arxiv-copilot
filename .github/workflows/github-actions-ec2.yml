@@ -1,6 +1,6 @@
 name: Push-to-EC2
 
-# Trigger deployment only on push to main branch
+# Trigger deployment only on push to master branch
 on:
   push:
     branches:
@@ -14,10 +14,8 @@ jobs:
     steps:
       - name: Checkout the files
         uses: actions/checkout@v3
-        with:
-          lfs: true
 
-      - name: Deploy to Server 1
+      - name: Deploy to Server
         uses: easingthemes/ssh-deploy@main
         env:
           SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
@@ -25,7 +23,7 @@ jobs:
           REMOTE_USER: ${{ secrets.USERNAME }}
           TARGET: ${{ secrets.TARGET_DIR }}
 
-      - name: Pull Git LFS files on EC2
+      - name: Execute remote commands
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.HOST_DNS }}
@@ -33,110 +31,26 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd ${{ secrets.TARGET_DIR }}
-            if command -v git-lfs &> /dev/null; then
-              echo "Pulling Git LFS files..."
-              git lfs pull
-            else
-              echo "Git LFS not installed on server, installing..."
-              # Install Git LFS if not available (for Ubuntu/Debian)
-              sudo apt-get update && sudo apt-get install -y git-lfs || echo "Failed to install Git LFS"
-              git lfs pull || echo "Git LFS pull failed, files may need manual setup"
-            fi
-
-      - name: Check and clean up disk space
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.HOST_DNS }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            echo "=== Disk Space Check ==="
-            df -h
-            echo ""
-            echo "=== Cleaning up disk space ==="
-            # Clean pip cache (both system and user)
-            pip cache purge 2>/dev/null || echo "No pip cache to clean"
-            pip3 cache purge 2>/dev/null || echo "No pip3 cache to clean"
-            rm -rf ~/.cache/pip 2>/dev/null || echo "No user pip cache to clean"
-            # Clean virtual environment pip cache if exists
-            cd ${{ secrets.TARGET_DIR }}
-            if [ -d ".venv" ]; then
-              .venv/bin/pip cache purge 2>/dev/null || echo "No venv pip cache to clean"
-              rm -rf .venv/lib/python*/site-packages/*/__pycache__ 2>/dev/null || echo "No pycache to clean"
-            fi
-            # Clean system package cache (if on Ubuntu/Debian)
-            sudo apt-get clean 2>/dev/null || echo "No apt cache to clean"
-            # Clean old log files (keep last 7 days)
-            find /var/log -name "*.log" -type f -mtime +7 -delete 2>/dev/null || echo "No old logs to clean"
-            # Clean temporary files
-            sudo rm -rf /tmp/* 2>/dev/null || echo "No temp files to clean"
-            sudo rm -rf /var/tmp/* 2>/dev/null || echo "No var/tmp files to clean"
-            # Clean old Streamlit logs (keep last 100 lines)
-            if [ -f streamlit.log ]; then
-              tail -100 streamlit.log > streamlit.log.tmp && mv streamlit.log.tmp streamlit.log || echo "Could not truncate streamlit.log"
-            fi
-            # Check inode usage
-            echo ""
-            echo "=== Inode Usage ==="
-            df -i
-            echo ""
-            echo "=== Disk Space After Cleanup ==="
-            df -h
-            echo ""
-            echo "=== Checking available disk space ==="
-            # Check if root partition has less than 1GB free
-            AVAILABLE=$(df / | tail -1 | awk '{print $4}')
-            if [ "$AVAILABLE" -lt 1048576 ]; then
-              echo "⚠️ WARNING: Less than 1GB free space remaining!"
-              echo "Available: ${AVAILABLE}KB"
-              echo "Please manually clean up more space or expand the disk."
-            else
-              echo "✅ Sufficient disk space available: ${AVAILABLE}KB"
-            fi
-
-      - name: Executing remote ssh commands using ssh key
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.HOST_DNS }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cd ${{ secrets.TARGET_DIR }}
-            echo "Setting up virtual environment..."
+            
+            # 1. Set up virtual environment if it doesn't exist
             if [ ! -d ".venv" ]; then
               echo "Creating .venv virtual environment..."
               python3 -m venv .venv
             fi
-            echo "Activating virtual environment..."
+            
+            # 2. Activate virtual environment and install dependencies
+            echo "Activating .venv and installing requirements..."
             source .venv/bin/activate
-            echo "Upgrading pip..."
-            pip3 install --upgrade pip
-            echo "Cleaning pip cache before installation..."
-            pip3 cache purge || true
-            rm -rf ~/.cache/pip 2>/dev/null || true
-            echo "Installing/updating Python dependencies (without cache)..."
-            pip3 install -r requirements.txt --upgrade --no-cache-dir --no-warn-script-location
-            if [ $? -ne 0 ]; then
-              echo "Failed to install dependencies. Check requirements.txt"
-              exit 1
-            fi
-            echo "Verifying Streamlit installation..."
-            which streamlit || {
-              echo "Streamlit not found in PATH"
-              exit 1
-            }
-            echo "Killing old Streamlit processes if any..."
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            
+            # 3. Restart Streamlit application
+            echo "Restarting Streamlit..."
+            # Kill existing streamlit process running on port 8501
             fuser -k 8501/tcp || true
             sleep 2
-            echo "Starting new Streamlit app..."
-            # use the full path of the virtual environment
-            nohup .venv/bin/streamlit run streamlit_app.py --server.port 8501 --server.baseUrlPath /streamlit > streamlit.log 2>&1 &
-            sleep 3
-            echo "Checking if Streamlit started..."
-            if pgrep -f "streamlit run" > /dev/null; then
-              echo "✅ Deployment complete. Streamlit is running on port 8501 at /streamlit/"
-            else
-              echo "❌ Streamlit failed to start. Check streamlit.log:"
-              tail -20 streamlit.log
-              exit 1
-            fi
+            
+            # Run Streamlit in background
+            nohup streamlit run streamlit_app.py --server.port 8501 --server.baseUrlPath /streamlit > streamlit.log 2>&1 &
+            
+            echo "Deployment completed successfully!"

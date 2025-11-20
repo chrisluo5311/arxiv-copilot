@@ -1,69 +1,115 @@
 import os
 from openai import OpenAI
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
-
+from scripts.storage_s3 import (
+    read_text_from_s3,
+    S3_CHUNK_PREFIX,
+    S3_UPLOAD_CHUNK_PREFIX,
+)
+import math
 # ------------------ Configuration ------------------ #
 load_dotenv()
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-# o4-mini = 200,000 context window # 100,000 max output tokens
-# gpt-3.5-turbo = 16,385 context window # 4,096 max output tokens
-# gpt-4o = 128,000 context window # 16,384 max output tokens
-# chatgpt-4o (currently used in ChatGPT) = 128,000 context window # 16,384 max output tokens
-MODEL_NAME = "gpt-4o"
-MAX_CONTEXT_TOKENS = 12_000  # leave room for the question & response
-model = SentenceTransformer("all-MiniLM-L6-v2")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL")
 
-# /Users/luojidong/程式/arxiv-copilot/scripts
-current_dir = os.path.dirname(os.path.abspath(__file__)) 
-# /Users/luojidong/程式/arxiv-copilot/scripts/pdf_chunks
-chunk_dir = os.path.join(current_dir, "pdf_chunks") 
-# /Users/luojidong/程式/arxiv-copilot/scripts/pdf_chunks
-upload_file_chunk_dir = os.path.join(current_dir, "upload_file_chunks") 
-# --------------------------------------------------- #
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+# ------------------ Titan embedding ------------------ #
+def embed_with_openai(text: str) -> list[float]:
+    resp = openai_client.embeddings.create(
+        model=EMBEDDING_MODEL,
+        input=text
+    )
+    return resp.data[0].embedding
+
+def cosine_sim(a: list[float], b: list[float]) -> float:
+    # manually calculate cosine similarity, avoid pulling numpy / torch
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for x, y in zip(a, b):
+        dot += x * y
+        na += x * x
+        nb += y * y
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (math.sqrt(na) * math.sqrt(nb))
+
+def _chunk_text(full_text: str, chunk_size: int = 300, stride: int = 100) -> list[str]:
+    words = full_text.split()
+    if len(words) <= chunk_size:
+        return [" ".join(words)]
+    chunks = [
+        " ".join(words[i : i + chunk_size])
+        for i in range(0, len(words) - chunk_size + 1, stride)
+    ]
+    return chunks
 
 def load_and_chunk(arxiv_id, chunk_size=300, stride=100):
     """
-    Overlapping: [0,299], [100,399], [200,499] for better continuity between chunks
-    - smaller chunk_size for short question-answering
-    - larger chunk_size for summarization or multi-section questions
-    - stride: overlap between chunks
+    Load and chunk the PDF from S3
+    Args:
+        arxiv_id: the arXiv ID of the paper
+        chunk_size: the size of the chunks
+        stride: the stride of the chunks
+    Returns:
+        chunks: the chunks of the PDF
     """
-    # /Users/luojidong/程式/arxiv-copilot/scripts/pdf_chunks/0704.0001.txt
-    path = os.path.join(chunk_dir, f"{arxiv_id}.txt") 
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"arXiv file not found: {path}")
-    with open(path, "r") as f:
-        full_text = f.read()
-
-    # Split into chunks of N words
-    words = full_text.split()
-    chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words) - chunk_size + 1, stride)]
-    return chunks
+    key = S3_CHUNK_PREFIX + f"{arxiv_id}.txt"
+    full_text = read_text_from_s3(key)
+    return _chunk_text(full_text, chunk_size=chunk_size, stride=stride)
 
 def load_uploaded_file_and_chunk(file_name, chunk_size=300, stride=100):
-    # /Users/luojidong/程式/arxiv-copilot/scripts/pdf_chunks/0704.0001.txt
-    path = os.path.join(upload_file_chunk_dir, f"{file_name}.txt") 
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"uploaded file not found: {path}")
-    with open(path, "r") as f:
-        full_text = f.read()
-
-    words = full_text.split()
-    chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words) - chunk_size + 1, stride)]
-    return chunks
+    """
+    Load and chunk the uploaded file
+    Args:
+        file_name: the name of the uploaded file
+        chunk_size: the size of the chunks
+        stride: the stride of the chunks
+    Returns:
+        chunks: the chunks of the uploaded file
+    """
+    key = S3_UPLOAD_CHUNK_PREFIX + f"{file_name}.txt"
+    full_text = read_text_from_s3(key)
+    return _chunk_text(full_text, chunk_size=chunk_size, stride=stride)
 
 def retrieve_top_chunks(query, chunks, top_k=10):
+    """
+    Retrieve the top chunks based on the query
+    Args:
+        query: the query
+        chunks: the chunks
+        top_k: the number of top chunks
+    Returns:
+        top_chunks: the top chunks
+    """
     if not chunks:
         raise ValueError("No chunks available for retrieval.")
-    chunk_embeddings = model.encode(chunks)
-    query_embedding = model.encode([query])
-    similarities = cosine_similarity(query_embedding, chunk_embeddings)[0]
-    top_indices = similarities.argsort()[::-1][:top_k]
-    return [chunks[i] for i in top_indices]
+
+    query_emb = embed_with_openai(query)
+
+    scored = []
+    for ch in chunks:
+        ch_emb = embed_with_openai(ch)
+        score = cosine_sim(query_emb, ch_emb)
+        scored.append((score, ch))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top = [ch for score, ch in scored[:top_k]]
+    return top
 
 def standalone_answer(query, chunks, model_name, base64_image, api_key=None):
+    """
+    Generate the answer based on the query and the chunks   
+    Args:
+        query: the query
+        chunks: the chunks
+        model_name: the name of the model
+        base64_image: the base64 image
+        api_key: the API key
+    Returns:
+        answer: the answer
+    """
     client = OpenAI(api_key=api_key)
     context = "\n\n".join(chunks)
     prompt = f"""You are a helpful AI assistant specialized in scientific research.
@@ -95,7 +141,7 @@ def standalone_answer(query, chunks, model_name, base64_image, api_key=None):
     
     response = client.chat.completions.create(
         model=model_name,
-        temperature=0.3,
+        temperature=1,
         messages=[
             {
                 "role": "developer",
@@ -108,14 +154,3 @@ def standalone_answer(query, chunks, model_name, base64_image, api_key=None):
         ]
     )
     return response.choices[0].message.content.strip()
-
-# Example
-# if __name__ == "__main__":
-#     arxiv_id = "0704.0001"
-#     query = "How does the paper calculate diphoton production cross-sections?"
-#     chunks = load_and_chunk(arxiv_id)
-#     top_chunks = retrieve_top_chunks(query, chunks, top_k=5)
-#     answer = standalone_answer(query, top_chunks, MODEL_NAME, api_key=os.getenv("OPENAI_API_KEY"))
-#
-#     print("🔎 Answer:")
-#     print(answer)

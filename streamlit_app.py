@@ -2,11 +2,12 @@ import os
 import torch
 import streamlit as st
 from dotenv import load_dotenv
-from custom_func import search_abstracts_function, download_arxiv_pdf_function
+from custom_func import search_abstracts_function, download_arxiv_pdf_function, web_search_function
 from scripts.rag_generate import load_and_chunk, load_uploaded_file_and_chunk, retrieve_top_chunks, standalone_answer
 from scripts.download_pdf import download_arxiv_pdf
 from scripts.parse_pdf_llama import parse_pdf_with_llamaparse, parse_file_with_llamaparse
 from scripts.abstract_search import search_abstracts
+from scripts.web_search import web_search
 from scripts.utils import build_system_prompt
 from scripts.prompt_template import default_prompt
 from streamlit_option_menu import option_menu
@@ -14,23 +15,26 @@ from openai import OpenAI
 import json
 import base64
 from PIL import Image
-
+from scripts.storage_s3 import (
+    S3_CHUNK_PREFIX,
+    S3_UPLOAD_PREFIX,
+    S3_UPLOAD_CHUNK_PREFIX,
+    s3_key_exists,
+)
 # ------------------ Configuration ------------------ #
 # disable torch classes
 torch.classes.__path__ = []
 load_dotenv()
 
-# e.g., current_dir: "/Users/luojidong/程式/arxiv-copilot"
-current_dir = os.path.dirname(os.path.abspath(__file__))
-all_function_tools = [search_abstracts_function, download_arxiv_pdf_function]
+# Base function tools (always available)
+base_function_tools = [search_abstracts_function, download_arxiv_pdf_function]
 
 # Define the list of supported file types
 image_exts = ["jpg", "jpeg", "png"]
 text_exts = ["pdf", "csv", "txt"]
-uploaded_file_save_path = os.path.join(current_dir, "scripts", "user_upload")
 
 # ------------------ Helper function ------------------ #
-def resize_image(image_path, max_dim=224):
+def resize_image(image_path, max_dim=1024):
     img = Image.open(image_path)
     img.thumbnail((max_dim, max_dim))
     img.save(image_path)
@@ -49,20 +53,19 @@ def process_uploaded_file(files, query):
     """
     for uploaded_file in files:
         filename = uploaded_file.name
-        print(f"Processing file {filename}...")
         ext = filename.split(".")[-1].lower()
-        full_filename = uploaded_file_save_path+"/"+filename
-
-        with open(full_filename, "wb") as f:
-            f.write(uploaded_file.read())
+        file_bytes = uploaded_file.read()
 
         if ext in ["jpg", "jpeg", "png"]:
             # Resize the image to prevent token limit violation
-            resize_image(full_filename)
-            base64_img = encode_image_to_base64(full_filename)
+            tmp_path = f"/tmp/{filename}"
+            with open(tmp_path, "wb") as f:
+                f.write(file_bytes)
+            resize_image(tmp_path)
+            base64_img = encode_image_to_base64(tmp_path)
             return base64_img, ext
         elif ext in ["pdf", "csv", "txt"]:
-            parse_file_with_llamaparse(filename)
+            parse_file_with_llamaparse(filename, file_bytes)
             upload_file_chunks = load_uploaded_file_and_chunk(filename)
             top_uploaded_chunks =retrieve_top_chunks(query, upload_file_chunks, 3)
             return top_uploaded_chunks, None
@@ -83,7 +86,7 @@ openai_api_key = st.sidebar.text_input("OpenAI API Key", key="chatbot_api_key", 
 # 2. Model selection
 model_selection = st.sidebar.selectbox(
     "Select Model",
-    options=["gpt-3.5-turbo", "gpt-4o", "gpt-4.1-nano"],
+    options=["gpt-5-mini-2025-08-07", "gpt-4.1-nano-2025-04-14", "gpt-5-nano-2025-08-07", "gpt-4.1-mini-2025-04-14"],
 )
 # 3. Show system prompt
 show_system_prompt = st.sidebar.checkbox("Show system prompt", value=False)
@@ -108,11 +111,13 @@ if st.session_state.get("show_toast"):
     st.toast('Reset successfully!', icon='🎉')
     del st.session_state["show_toast"]
 # 5. Show available tools
+# Base tools are always available
+available_tools = ["search_abstracts", "download_arxiv_pdf"]
+
 st.sidebar.subheader("Available Tools")
-use_abstracts = st.sidebar.checkbox("Download PDF", value=True)
-available_tools = []
-if use_abstracts:
-    available_tools.append("download_arxiv_pdf")
+is_web_search_enabled = st.sidebar.checkbox("Web Search", value=True)
+if is_web_search_enabled:
+    available_tools.append("web_search")
 
 # 6. Clear chat history
 is_reset_chat = st.sidebar.button("🗑️ Reset Chat")
@@ -134,37 +139,31 @@ if mode == "File Q&A":
     elif question and arxiv_id:
         # Check if the PDF is already downloaded
         # If not, download it
-        pdf_path = f"{current_dir}/pdfs/{arxiv_id}.pdf"
-        if not os.path.exists(pdf_path):
-            st.warning("Path not found. Creating Path for PDF...")
-            os.makedirs("./pdfs", exist_ok=True)
-            os.makedirs("./pdf_chunks", exist_ok=True)
-            if not download_arxiv_pdf(arxiv_id):
-                st.error("❌ Failed to download PDF from arXiv.")
+        s3_key = S3_CHUNK_PREFIX + f"{arxiv_id}.txt"
+
+        if not s3_key_exists(s3_key):
+            pdf_bytes = download_arxiv_pdf(arxiv_id)
+            if pdf_bytes is None:
+                st.error("Failed to download PDF from arXiv.")
                 st.stop()
-        try:
             with st.spinner("Parsing paper with LlamaParse..."):
-                parse_pdf_with_llamaparse(arxiv_id)
-            st.success("✅ PDF parsed successfully!")
-        except Exception as e:
-            st.error(f"❌ Parsing failed: {str(e)}")
-            st.stop()
-        try:
-            chunks = load_and_chunk(arxiv_id)
-            top_chunks = retrieve_top_chunks(question, chunks, top_k=top_k)
-            answer = standalone_answer(question, top_chunks, model_selection, None, openai_api_key)
+                parse_pdf_with_llamaparse(arxiv_id, pdf_bytes=pdf_bytes)
+            st.success("✅ Parsed text uploaded to S3!")
+            
+        st.write("Using pre-parsed chunks from S3…")
+        chunks = load_and_chunk(arxiv_id)
+        top_chunks = retrieve_top_chunks(question, chunks, top_k=top_k)
+        answer = standalone_answer(question, top_chunks, model_selection, None, openai_api_key)
 
-            # Display the top retrieved chunks
-            with st.expander("Top Retrieved Chunks"):
-                for i, chunk in enumerate(top_chunks):
-                    st.markdown(f"**Chunk {i+1}:**")
-                    st.write(chunk)
-                    st.markdown("---")
+        # Display the top retrieved chunks
+        with st.expander("Top Retrieved Chunks"):
+            for i, chunk in enumerate(top_chunks):
+                st.markdown(f"**Chunk {i+1}:**")
+                st.write(chunk)
+                st.markdown("---")
 
-            st.write("### Answer")
-            st.write(answer)
-        except FileNotFoundError:
-            st.error("Parsed file not found. Make sure the PDF has been parsed into /pdf_chunks/")
+        st.write("### Answer")
+        st.write(answer)
 
 # ------------------- Chatbot Mode ------------------- #
 elif mode == "Chatbot":
@@ -193,8 +192,8 @@ elif mode == "Chatbot":
             st.chat_message(msg["role"]).write(msg["content"])
     else:
         for msg in st.session_state.messages:
-            # Skip system, developer, and function messages
-            if msg["role"] != "system" and msg["role"] != "developer" and msg["role"] != "function":
+            # Skip system, developer, and function/tool messages
+            if msg["role"] not in ["system", "developer", "function", "tool"]:
                 st.chat_message(msg["role"]).write(msg["content"])
 
     # User input is assigned to the prompt variable
@@ -219,8 +218,9 @@ elif mode == "Chatbot":
             st.session_state.messages = st.session_state.messages[:2]  # Keep only system and greeting
 
         # append user input to the message history
-        if isinstance(uploaded_file_content, str) and uploaded_file_content.startswith("data:image/"):
-            # This is a base64 image already in data URI format
+        if isinstance(uploaded_file_content, str) and file_ext in image_exts:
+            # This is a base64 image
+            # process_uploaded_file returns just the base64 string (no data URI prefix)
             st.session_state.messages.append({
                 "role": "user",
                 "content": [
@@ -239,18 +239,21 @@ elif mode == "Chatbot":
         # Initialize OpenAI client
         client = OpenAI(api_key=openai_api_key)
 
+        # Build function tools list based on available tools
+        all_function_tools = base_function_tools.copy()
+        if "web_search" in available_tools:
+            all_function_tools.append(web_search_function)
+
         with st.status("💬 Thinking...", expanded=True) as status:
             st.write("Sending query to GPT...")
-
-            # generate response
             response = client.chat.completions.create(
-                model=model_selection,  # model
+                model=model_selection,
                 messages=st.session_state.messages, # history messages
-                tools=all_function_tools,  # search abstract tools
-                tool_choice="auto",  # auto decide whether to call the function
+                tools=all_function_tools,
+                tool_choice="auto",
             )
 
-            max_tool_calls = 5
+            max_tool_calls = 6
             call_count = 0
             # chain of tool calls
             while response.choices[0].finish_reason == "tool_calls":
@@ -258,11 +261,37 @@ elif mode == "Chatbot":
                     st.error("⚠️ Too many tool calls — possible infinite loop. Please refine your question.")
                     break
                 call_count += 1
-                tool_calls = response.choices[0].message.tool_calls
+                
+                # Append the assistant message with tool calls to the history
+                response_message = response.choices[0].message
+                tool_calls = response_message.tool_calls
+                
+                # Create a dict representation of the assistant message with tool calls
+                # explicitly extracting necessary fields to ensure JSON serialization compatibility
+                tool_calls_list = []
+                if tool_calls:
+                    for tc in tool_calls:
+                        tool_calls_list.append({
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        })
+                
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": response_message.content or "",
+                    "tool_calls": tool_calls_list
+                })
+
                 # ------------------ Tool calls ------------------ #
                 for tool_call in tool_calls:
                     function_name = tool_call.function.name
                     arguments = json.loads(tool_call.function.arguments)
+                    tool_call_id = tool_call.id
+                    
                     if function_name == "search_abstracts":
                         st.write(f"Calling `{function_name}`...")
                         results = search_abstracts(**arguments)
@@ -272,7 +301,9 @@ elif mode == "Chatbot":
                             [f"**Title**: {r.get('title','N/A')}\n\n"
                             f"**ID**: `{r.get('id','N/A')}`\n\n"
                             f"**Authors**: {r.get('authors','N/A')}\n\n"
-                            f"**Abstract**: {r.get('abstract','N/A')}"
+                            f"**Abstract**: {r.get('abstract','N/A')}\n\n"
+                            f"**Categories**: {r.get('categories','N/A')}\n\n"
+                            f"**Year**: {r.get('year','N/A')}"
                             for r in results]
                         )
 
@@ -280,8 +311,8 @@ elif mode == "Chatbot":
 
                         # Log tool response
                         st.session_state.messages.append({
-                            "role": "function",
-                            "name": function_name,
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
                             "content": top_k_search_result
                         })
 
@@ -293,50 +324,72 @@ elif mode == "Chatbot":
                             # Log tool result from cache
                             chunk_context = st.session_state[f"pdf_context_{arxiv_id}"]
                             st.session_state.messages.append({
-                                "role": "function",
-                                "name": "download_arxiv_pdf",
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
                                 "content": (
                                     f"(Cached) Result from `download_pdf`: Relevant chunks from `{arxiv_id}`:\n\n"
                                     f"{chunk_context}"
                                 )
                             })
                             continue
-                        if not download_arxiv_pdf(**arguments):
-                            st.error(f"❌ Failed to download PDF:{arxiv_id} from arXiv.")
-                            st.stop()
-                        st.write(f"PDF:{arxiv_id} downloaded successfully!")
-                        try:
-                            st.write("Parsing paper with LlamaParse...")
-                            parse_pdf_with_llamaparse(arxiv_id)
-                            st.write(f"PDF:{arxiv_id} parsed successfully!")
 
-                            # Load and chunk the parsed text
-                            chunks = load_and_chunk(arxiv_id)
-                            if not chunks:
-                                st.error(f"No chunks generated from parsed file for arXiv ID: {arxiv_id}")
+                        s3_key = S3_CHUNK_PREFIX + f"{arxiv_id}.txt"
+                        if not s3_key_exists(s3_key):
+                            pdf_bytes = download_arxiv_pdf(**arguments)
+                            if pdf_bytes is None:
+                                st.error(f"❌ Failed to download PDF:{arxiv_id} from arXiv.")
                                 st.stop()
-                            top_chunks = retrieve_top_chunks(user_text, chunks)
-                            # Log top chunks to session (tool result)
-                            chunk_context = "\n\n".join(top_chunks)
-                            # Cache the chunk context for future use
-                            st.session_state[f"pdf_context_{arxiv_id}"] = chunk_context
-                            st.session_state.messages.append({
-                                "role": "function",
-                                "name": "download_arxiv_pdf",
-                                "content": (
-                                    f"Result from `download_pdf`: Here are relevant chunks extracted from the paper `{arxiv_id}`:\n\n"
-                                    f"{chunk_context}"
-                                )
-                            })
-                        except FileNotFoundError:
-                            st.error("Parsed file not found. Make sure the PDF has been parsed into /pdf_chunks/")
+                            with st.spinner("Parsing paper with LlamaParse..."):
+                                parse_pdf_with_llamaparse(arxiv_id, pdf_bytes=pdf_bytes)
+                            st.success("✅ Parsed text uploaded to S3!")
 
-                    response = client.chat.completions.create(
-                        model=model_selection,
-                        messages=st.session_state.messages,
-                        tools=all_function_tools,
-                        tool_choice="auto"
-                    )
+                        # Load and chunk the parsed text
+                        chunks = load_and_chunk(arxiv_id)
+                        if not chunks:
+                            st.error(f"No chunks generated from parsed file for arXiv ID: {arxiv_id}")
+                            st.stop()
+                        top_chunks = retrieve_top_chunks(user_text, chunks)
+                        # Log top chunks to session (tool result)
+                        chunk_context = "\n\n".join(top_chunks)
+                        # Cache the chunk context for future use
+                        st.session_state[f"pdf_context_{arxiv_id}"] = chunk_context
+                        st.session_state.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "content": (
+                                f"Result from `download_pdf`: Here are relevant chunks extracted from the paper `{arxiv_id}`:\n\n"
+                                f"{chunk_context}"
+                            )
+                        })
+                    elif function_name == "web_search":
+                        st.write(f"Calling `{function_name}`...")
+                        query = arguments.get("query", "")
+                        max_results = arguments.get("max_results", 3)
+                        results = web_search(query, max_results=max_results)
+
+                        # Format the web search results
+                        web_search_result = "\n\n".join(
+                            [f"**Title**: {r.get('title', 'N/A')}\n\n"
+                             f"**URL**: {r.get('url', 'N/A')}\n\n"
+                             f"**Snippet**: {r.get('snippet', 'N/A')}"
+                             for r in results]
+                        )
+
+                        st.write("Web search results received. Re-querying GPT...")
+
+                        # Log tool response
+                        st.session_state.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "content": web_search_result
+                        })
+
+                response = client.chat.completions.create(
+                    model=model_selection,
+                    messages=st.session_state.messages,
+                    tools=all_function_tools,
+                    tool_choice="auto"
+                )
 
             final_msg = response.choices[0].message.content
             # Append the assistant's response to the session state
@@ -354,7 +407,7 @@ elif mode == "Fast Retrieval":
     # Top-k results to display
     top_k = st.slider("Top-k Results", min_value=1, max_value=10, value=5)
 
-    # Fast retrieval using FAISS, no need AI models
+    # Fast retrieval abstracts using FAISS
     if query:
         results = search_abstracts(query, top_k=top_k)
         cnt = 1
