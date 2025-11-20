@@ -1,5 +1,4 @@
 import os
-import torch
 import streamlit as st
 from dotenv import load_dotenv
 from custom_func import search_abstracts_function, download_arxiv_pdf_function, web_search_function
@@ -22,8 +21,6 @@ from scripts.storage_s3 import (
     s3_key_exists,
 )
 # ------------------ Configuration ------------------ #
-# disable torch classes
-torch.classes.__path__ = []
 load_dotenv()
 
 # Base function tools (always available)

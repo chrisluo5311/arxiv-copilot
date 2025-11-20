@@ -1,5 +1,4 @@
 import requests
-import os
 
 def download_arxiv_pdf(arxiv_id: str) -> bytes:
     """ 

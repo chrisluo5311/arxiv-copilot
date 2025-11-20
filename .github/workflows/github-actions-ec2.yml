@@ -32,6 +32,12 @@ jobs:
           script: |
             cd ${{ secrets.TARGET_DIR }}
             
+            # 0. Backup .env file if it exists (to prevent it from being overwritten)
+            if [ -f ".env" ]; then
+              echo "Backing up existing .env file..."
+              cp .env .env.backup
+            fi
+            
             # 1. Set up virtual environment if it doesn't exist
             if [ ! -d ".venv" ]; then
               echo "Creating .venv virtual environment..."
@@ -44,7 +50,13 @@ jobs:
             pip install --upgrade pip
             pip install -r requirements.txt
             
-            # 3. Restart Streamlit application
+            # 3. Restore .env file if it was backed up
+            if [ -f ".env.backup" ]; then
+              echo "Restoring .env file..."
+              mv .env.backup .env
+            fi
+            
+            # 4. Restart Streamlit application
             echo "Restarting Streamlit..."
             # Kill existing streamlit process running on port 8501
             fuser -k 8501/tcp || true
